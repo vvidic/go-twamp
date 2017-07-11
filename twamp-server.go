@@ -126,7 +126,7 @@ type TestResponse struct {
 	SenderTTL       byte
 }
 
-func serveTwamp(listen string) error {
+func serveTwamp(listen string, udp_start uint) error {
 	sock, err := net.Listen("tcp", listen)
 	if err != nil {
 		fmt.Println("Error listening: ", err.Error())
@@ -134,7 +134,7 @@ func serveTwamp(listen string) error {
 	}
 	defer sock.Close()
 
-	var udp_port uint16 = 2000
+	var udp_port = uint16(udp_start)
 	for {
 		conn, err := sock.Accept()
 		if err != nil {
@@ -498,7 +498,8 @@ func runReflector(conn *net.UDPConn) {
 
 func main() {
 	listenPtr := flag.String("listen", "localhost:2000", "listen address")
+	udpStart := flag.Uint("udp-start", 2000, "initial UDP port for tests")
 	flag.Parse()
 
-	serveTwamp(*listenPtr)
+	serveTwamp(*listenPtr, *udpStart)
 }
