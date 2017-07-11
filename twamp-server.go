@@ -129,16 +129,17 @@ type TestResponse struct {
 func serveTwamp(listen string, udp_start uint) error {
 	sock, err := net.Listen("tcp", listen)
 	if err != nil {
-		fmt.Println("Error listening: ", err.Error())
+		fmt.Printf("Error listening on %s: %s\n", listen, err)
 		return err
 	}
 	defer sock.Close()
+	fmt.Println("Listening on", listen)
 
 	var udp_port = uint16(udp_start)
 	for {
 		conn, err := sock.Accept()
 		if err != nil {
-			fmt.Println("Error accepting: ", err.Error())
+			fmt.Println("Error accepting connection:", err)
 		} else {
 			go handleClient(conn, udp_port)
 			udp_port++
@@ -149,45 +150,47 @@ func serveTwamp(listen string, udp_start uint) error {
 func handleClient(conn net.Conn, udp_port uint16) {
 	defer conn.Close()
 
+	fmt.Println("Handling control connection from client", conn.RemoteAddr())
+
 	err := sendServerGreeting(conn)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error sending greeting:", err)
 		return
 	}
 
 	_, err = receiveSetupResponse(conn)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error receiving setup:", err)
 		return
 	}
 
 	err = sendServerStart(conn)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error sending start:", err)
 		return
 	}
 
 	_, err = receiveRequestSession(conn)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error receiving session:", err)
 		return
 	}
 
 	udp_conn, err := startReflector(udp_port)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Error starting reflector on port %d: %s\n", udp_port, err)
 		return
 	}
 
 	err = sendAcceptSession(conn, udp_port)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error sending session accept:", err)
 		return
 	}
 
 	_, err = receiveStartSessions(conn)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error receiving start sessions:", err)
 		return
 	}
 
@@ -195,19 +198,19 @@ func handleClient(conn net.Conn, udp_port uint16) {
 
 	err = sendStartAck(conn)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error sending start ACK:", err)
 		return
 	}
 
 	_, err = receiveStopSessions(conn)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error receiving stop sessions:", err)
 		return
 	}
 
 	err = udp_conn.Close()
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Error closing UDP socket:", err)
 		return
 	}
 }
@@ -476,19 +479,19 @@ func runReflector(conn *net.UDPConn) {
 	for {
 		_, addr, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Error receiving test packet:", err)
 			return
 		}
 
 		response, err := createTestResponse(buf, seq)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Error creating test response:", err)
 			return
 		}
 
 		_, err = conn.WriteToUDP(response, addr)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Error sending test reponse:", err)
 			return
 		}
 
