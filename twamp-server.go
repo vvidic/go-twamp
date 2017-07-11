@@ -194,7 +194,9 @@ func handleClient(conn net.Conn, udp_port uint16) {
 		return
 	}
 
-	go runReflector(udp_conn)
+	test_done := make(chan bool)
+	defer close(test_done)
+	go runReflector(udp_conn, test_done)
 
 	err = sendStartAck(conn)
 	if err != nil {
@@ -208,11 +210,7 @@ func handleClient(conn net.Conn, udp_port uint16) {
 		return
 	}
 
-	err = udp_conn.Close()
-	if err != nil {
-		fmt.Println("Error closing UDP socket:", err)
-		return
-	}
+	fmt.Println("Finished control connection from client", conn.RemoteAddr())
 }
 
 func sendServerGreeting(conn net.Conn) error {
@@ -473,12 +471,32 @@ func startReflector(udp_port uint16) (*net.UDPConn, error) {
 	return conn, nil
 }
 
-func runReflector(conn *net.UDPConn) {
+func runReflector(conn *net.UDPConn, test_done chan bool) {
 	var seq uint32 = 0
 	buf := make([]byte, 10240)
+	timeout := 10 * time.Second;
+	defer conn.Close()
+
+	fmt.Println("Handling test session on port", conn.LocalAddr())
 	for {
+		err := conn.SetReadDeadline(time.Now().Add(timeout))
+		if err != nil {
+			fmt.Println("Error setting test deadline:", err)
+			return
+		}
+
 		_, addr, err := conn.ReadFromUDP(buf)
 		if err != nil {
+			if err, ok := err.(net.Error); ok && err.Timeout() {
+				if _, ok := <-test_done; !ok {
+					fmt.Println("Finished test session on port", conn.LocalAddr())
+					return
+				} else {
+					fmt.Println("Timeout waiting for test packet:", err)
+					continue
+				}
+			}
+
 			fmt.Println("Error receiving test packet:", err)
 			return
 		}
