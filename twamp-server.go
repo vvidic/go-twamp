@@ -7,7 +7,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/golang/glog"
 	"net"
+	"os"
+	"os/signal"
 	"strconv"
 	"time"
 )
@@ -129,88 +132,87 @@ type TestResponse struct {
 func serveTwamp(listen string, udp_start uint) error {
 	sock, err := net.Listen("tcp", listen)
 	if err != nil {
-		fmt.Printf("Error listening on %s: %s\n", listen, err)
-		return err
+		return fmt.Errorf("Error listening on %s: %s", listen, err)
 	}
+
+	glog.Infoln("Listening on", listen)
 	defer sock.Close()
-	fmt.Println("Listening on", listen)
 
 	var udp_port = uint16(udp_start)
 	for {
 		conn, err := sock.Accept()
 		if err != nil {
-			fmt.Println("Error accepting connection:", err)
-		} else {
-			go handleClient(conn, udp_port)
-			udp_port++
+			return fmt.Errorf("Error accepting connection: %s", err)
 		}
+
+		go handleClient(conn, udp_port)
+		udp_port++
 	}
 }
 
 func handleClient(conn net.Conn, udp_port uint16) {
+	err := serveClient(conn, udp_port)
+	if err != nil {
+		glog.Error(err)
+	}
+}
+
+func serveClient(conn net.Conn, udp_port uint16) error {
 	defer conn.Close()
 
-	fmt.Println("Handling control connection from client", conn.RemoteAddr())
+	glog.Infoln("Handling control connection from client", conn.RemoteAddr())
 
 	err := sendServerGreeting(conn)
 	if err != nil {
-		fmt.Println("Error sending greeting:", err)
-		return
+		return fmt.Errorf("Error sending greeting: %s", err)
 	}
 
 	_, err = receiveSetupResponse(conn)
 	if err != nil {
-		fmt.Println("Error receiving setup:", err)
-		return
+		return fmt.Errorf("Error receiving setup: %s", err)
 	}
 
 	err = sendServerStart(conn)
 	if err != nil {
-		fmt.Println("Error sending start:", err)
-		return
+		return fmt.Errorf("Error sending start: %s", err)
 	}
 
 	_, err = receiveRequestSession(conn)
 	if err != nil {
-		fmt.Println("Error receiving session:", err)
-		return
+		return fmt.Errorf("Error receiving session: %s", err)
 	}
 
 	udp_conn, err := startReflector(udp_port)
 	if err != nil {
-		fmt.Printf("Error starting reflector on port %d: %s\n", udp_port, err)
-		return
+		return fmt.Errorf("Error starting reflector on port %d: %s", udp_port, err)
 	}
 
 	err = sendAcceptSession(conn, udp_port)
 	if err != nil {
-		fmt.Println("Error sending session accept:", err)
-		return
+		return fmt.Errorf("Error sending session accept: %s", err)
 	}
 
 	_, err = receiveStartSessions(conn)
 	if err != nil {
-		fmt.Println("Error receiving start sessions:", err)
-		return
+		return fmt.Errorf("Error receiving start sessions: %s", err)
 	}
 
 	test_done := make(chan bool)
 	defer close(test_done)
-	go runReflector(udp_conn, test_done)
+	go handleReflector(udp_conn, test_done)
 
 	err = sendStartAck(conn)
 	if err != nil {
-		fmt.Println("Error sending start ACK:", err)
-		return
+		return fmt.Errorf("Error sending start ACK: %s", err)
 	}
 
 	_, err = receiveStopSessions(conn)
 	if err != nil {
-		fmt.Println("Error receiving stop sessions:", err)
-		return
+		return fmt.Errorf("Error receiving stop sessions: %s", err)
 	}
 
-	fmt.Println("Finished control connection from client", conn.RemoteAddr())
+	glog.Infoln("Finished control connection from client", conn.RemoteAddr())
+	return nil
 }
 
 func sendServerGreeting(conn net.Conn) error {
@@ -471,50 +473,72 @@ func startReflector(udp_port uint16) (*net.UDPConn, error) {
 	return conn, nil
 }
 
-func runReflector(conn *net.UDPConn, test_done chan bool) {
+func handleReflector(conn *net.UDPConn, test_done chan bool) {
+	err := runReflector(conn, test_done)
+	if err != nil {
+		glog.Error(err)
+	}
+}
+
+func runReflector(conn *net.UDPConn, test_done chan bool) error {
 	var seq uint32 = 0
 	buf := make([]byte, 10240)
-	timeout := 10 * time.Second;
+	timeout := 10 * time.Second
 	defer conn.Close()
 
-	fmt.Println("Handling test session on port", conn.LocalAddr())
+	glog.Infoln("Handling test session on port", conn.LocalAddr())
 	for {
 		err := conn.SetReadDeadline(time.Now().Add(timeout))
 		if err != nil {
-			fmt.Println("Error setting test deadline:", err)
-			return
+			return fmt.Errorf("Error setting test deadline: %s", err)
 		}
 
 		_, addr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			if err, ok := err.(net.Error); ok && err.Timeout() {
 				if _, ok := <-test_done; !ok {
-					fmt.Println("Finished test session on port", conn.LocalAddr())
-					return
+					glog.Infoln("Finished test session on port", conn.LocalAddr())
+					return nil
 				} else {
-					fmt.Println("Timeout waiting for test packet:", err)
+					glog.V(2).Infoln("Timeout waiting for test packet:", err)
 					continue
 				}
 			}
 
-			fmt.Println("Error receiving test packet:", err)
-			return
+			return fmt.Errorf("Error receiving test packet: %s", err)
 		}
 
 		response, err := createTestResponse(buf, seq)
 		if err != nil {
-			fmt.Println("Error creating test response:", err)
-			return
+			return fmt.Errorf("Error creating test response: %s", err)
 		}
 
 		_, err = conn.WriteToUDP(response, addr)
 		if err != nil {
-			fmt.Println("Error sending test reponse:", err)
-			return
+			return fmt.Errorf("Error sending test reponse: %s", err)
 		}
 
 		seq++
 	}
+}
+
+func cleanup() {
+	glog.Flush()
+}
+
+func handleSignals(c chan os.Signal) {
+	sig := <-c
+	glog.Infoln("Exiting, got signal:", sig)
+
+	cleanup()
+	os.Exit(0)
+}
+
+func setupSignals() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+
+	go handleSignals(c)
 }
 
 func main() {
@@ -522,5 +546,11 @@ func main() {
 	udpStart := flag.Uint("udp-start", 2000, "initial UDP port for tests")
 	flag.Parse()
 
-	serveTwamp(*listenPtr, *udpStart)
+	setupSignals()
+
+	err := serveTwamp(*listenPtr, *udpStart)
+	if err != nil {
+		glog.Error(err)
+	}
+	cleanup()
 }
