@@ -422,7 +422,6 @@ func sendStartAck(conn net.Conn) error {
 }
 
 func createTestResponse(buf []byte, seq uint32) ([]byte, error) {
-	received := time.Now()
 	req_len := len(buf)
 
 	req := new(TestRequest)
@@ -431,6 +430,7 @@ func createTestResponse(buf []byte, seq uint32) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	received := time.Now()
 
 	resp := new(TestResponse)
 	resp.SenderSequence = req.Sequence
