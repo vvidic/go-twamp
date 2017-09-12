@@ -440,6 +440,7 @@ func createTestResponse(buf []byte, seq uint32) ([]byte, error) {
 
 	resp.Sequence = seq
 	resp.RcvTimestamp = getTimestamp(received)
+	resp.ErrorEst = createErrorEstimate()
 
 	writer := new(bytes.Buffer)
 	resp.Timestamp = getTimestamp(time.Now())
@@ -457,6 +458,32 @@ func createTestResponse(buf []byte, seq uint32) ([]byte, error) {
 	}
 
 	return writer.Bytes(), nil
+}
+
+func createErrorEstimate() uint16 {
+	var estimate uint16 = 0x3FFF
+
+	var buf syscall.Timex
+	_, err := syscall.Adjtimex(&buf)
+	if err != nil {
+		return estimate
+	}
+
+	multiplier := buf.Esterror
+	multiplier <<= 32
+	multiplier /= 1000000
+
+	var scale uint16
+	for multiplier >= 0xFF {
+		scale++
+		multiplier >>= 1
+	}
+
+	estimate = 1 << 15
+	estimate |= scale << 8
+	estimate |= uint16(multiplier & 0xFF)
+
+	return estimate
 }
 
 func startReflector(udp_port uint16) (*net.UDPConn, error) {
