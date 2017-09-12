@@ -42,7 +42,7 @@ type ServerGreeting struct {
 	Challenge [16]byte
 	Salt      [16]byte
 	Count     uint32
-	MBZ       [16]byte
+	MBZ       [12]byte
 }
 
 type SetupResponse struct {
