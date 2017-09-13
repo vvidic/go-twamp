@@ -381,6 +381,10 @@ func createAcceptSession(accept byte, port uint16) (*AcceptSession, error) {
 
 	msg.Accept = accept
 	msg.Port = port
+	_, err := rand.Read(msg.SID[:])
+	if err != nil {
+		return nil, err
+	}
 
 	return msg, nil
 }
