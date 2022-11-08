@@ -1,4 +1,4 @@
-module github.com/vvidic/go-twamp
+module github.com/orn1983/twamp-server/v2
 
 go 1.18
 
