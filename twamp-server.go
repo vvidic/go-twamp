@@ -425,9 +425,7 @@ func sendStartAck(conn net.Conn) error {
 	return nil
 }
 
-func createTestResponse(buf []byte, seq uint32) ([]byte, error) {
-	req_len := len(buf)
-
+func createTestResponse(buf []byte, seq uint32, req_len int) ([]byte, error) {
 	req := new(TestRequest)
 	reader := bytes.NewBuffer(buf)
 	err := binary.Read(reader, binary.BigEndian, req)
@@ -525,13 +523,14 @@ func runReflector(conn *net.UDPConn, test_done chan bool) error {
 			return fmt.Errorf("Error setting test deadline: %s", err)
 		}
 
-		_, addr, err := conn.ReadFromUDP(buf)
+		req_len, addr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			if err, ok := err.(net.Error); ok && err.Timeout() {
-				if _, ok := <-test_done; !ok {
+				select {
+				case <-test_done:
 					glog.Infoln("Finished test session on port", conn.LocalAddr())
 					return nil
-				} else {
+				default:
 					glog.V(2).Infoln("Timeout waiting for test packet:", err)
 					continue
 				}
@@ -540,7 +539,7 @@ func runReflector(conn *net.UDPConn, test_done chan bool) error {
 			return fmt.Errorf("Error receiving test packet: %s", err)
 		}
 
-		response, err := createTestResponse(buf, seq)
+		response, err := createTestResponse(buf, seq, req_len)
 		if err != nil {
 			return fmt.Errorf("Error creating test response: %s", err)
 		}
