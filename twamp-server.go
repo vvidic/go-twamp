@@ -526,10 +526,11 @@ func runReflector(conn *net.UDPConn, test_done chan bool) error {
 		req_len, addr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			if err, ok := err.(net.Error); ok && err.Timeout() {
-				if _, ok := <-test_done; !ok {
+				select {
+				case <-test_done:
 					glog.Infoln("Finished test session on port", conn.LocalAddr())
 					return nil
-				} else {
+				default:
 					glog.V(2).Infoln("Timeout waiting for test packet:", err)
 					continue
 				}
